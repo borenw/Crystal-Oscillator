@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Crystal BVD — Impedance + Phase + Zoom</title>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;background:#fff;color:#222;font-family:monospace;}
+  #controls{
+    display:flex;flex-wrap:wrap;gap:14px;padding:10px 18px;
+    background:#f2f2f2;border-bottom:1px solid #bbb;align-items:flex-end;
+  }
+  .ctrl{display:flex;flex-direction:column;font-size:14px;color:#444;}
+  .ctrl label{margin-bottom:3px;font-weight:bold;}
+  .ctrl input{
+    width:108px;background:#fff;border:1px solid #999;color:#111;
+    padding:3px 7px;border-radius:3px;font-family:monospace;font-size:14px;
+  }
+  .presets{display:flex;flex-direction:column;gap:6px;justify-content:flex-end;}
+  .presets button{
+    padding:6px 14px;font-size:13px;font-family:monospace;font-weight:bold;
+    border:1.5px solid #888;border-radius:5px;cursor:pointer;
+    background:#e8e8e8;color:#222;transition:background 0.15s;
+  }
+  .presets button:hover{background:#d0d8f0;}
+  .presets button.active{background:#1a3a8a;color:#fff;border-color:#1a3a8a;}
+  #legend{
+    display:flex;flex-wrap:wrap;gap:16px;padding:6px 18px;
+    font-size:13px;background:#f2f2f2;border-bottom:1px solid #bbb;align-items:flex-end;
+  }
+  .leg{display:flex;align-items:center;gap:6px;}
+  #outer{display:flex;justify-content:center;background:#f9f9f9;}
+  #container{display:flex;flex-direction:row;width:100%;max-width:1200px;background:#fff;}
+  #col-zoom{display:flex;flex-direction:column;flex:0 0 26%;min-width:0;border-right:2px solid #ddd;}
+  #col-main{display:flex;flex-direction:column;flex:1 1 0;min-width:0;position:relative;}
+  .panel-label{
+    padding:3px 10px;font-size:11px;font-weight:bold;
+    background:#f0f4ff;border-bottom:1px solid #ccd;color:#336;text-align:center;
+  }
+  .divider{height:3px;background:#e0e0e0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;}
+  canvas{display:block;}
+  #info{display:none;}
+  #dragHint{
+    position:fixed;pointer-events:none;
+    background:rgba(40,80,200,0.9);color:#fff;
+    font-size:11px;font-family:monospace;font-weight:bold;
+    padding:3px 8px;border-radius:4px;white-space:nowrap;
+    border:1px solid #1144aa;display:none;z-index:999;
+  }
+
+  /* game mode removed */
+
+  /* ── BVD Circuit SVG ── */
+  #circuitBar{
+    display:flex;align-items:center;justify-content:center;
+    padding:6px 18px;background:#f8f8f8;border-bottom:1px solid #ccc;
+    gap:20px;
+  }
+  #circuitSvg{width:280px;height:80px;flex-shrink:0;}
+  #freqReadout{
+    font-family:monospace;font-size:13px;color:#333;
+    background:#fff;border:1px solid #bbb;border-radius:5px;
+    padding:5px 10px;min-width:220px;line-height:1.7;
+    box-shadow:0 1px 4px rgba(0,0,0,0.08);
+  }
+  #freqReadout .fr-lbl{color:#888;font-size:11px;}
+  /* Cursor tooltip */
+  #cursorTip{
+    position:fixed;pointer-events:none;
+    background:rgba(20,20,40,0.92);color:#fff;
+    font-size:12px;font-family:monospace;
+    padding:5px 9px;border-radius:5px;line-height:1.65;
+    border:1px solid #555;display:none;z-index:3000;
+    white-space:pre;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+<div id="controls">
+  <div class="ctrl"><label>Rs (Ω)</label><input id="Rs" type="number" value="70000" step="100" min="0.01"></div>
+  <div class="ctrl"><label>Rp (MΩ)</label><input id="Rp" type="number" value="500000" step="1000" min="1"></div>
+  <div class="ctrl"><label>Cp (pF)</label><input id="Cp" type="number" value="1.0" step="0.1" min="0.01"></div>
+  <div class="ctrl"><label>Cs (fF)</label><input id="Cs" type="number" value="0.0034" step="0.0001" min="0.00001"></div>
+  <div class="ctrl"><label>Ls (H)</label><input id="Ls" type="number" value="6938434" step="10000" min="0.001"></div>
+  <div class="presets">
+    <button id="btnTypical" class="active" onclick="setTypical()">Epson FC-135</button>
+    <button id="btnCs10" onclick="setCs10()">Cs = 10 × Cp</button>
+  </div>
+  </div>
+<div id="legend">
+  <div class="leg"><canvas width="36" height="10" id="l1"></canvas><span><b>|Z|</b></span></div>
+  <div class="leg"><canvas width="36" height="10" id="l2"></canvas><span style="color:#0a1a7a"><b>1/ωCp ⇕drag</b></span></div>
+  <div class="leg"><canvas width="36" height="10" id="l3"></canvas><span style="color:#5599dd">1/ωCs ⇕drag</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l4"></canvas><span style="color:#bb5500">Rs</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l5"></canvas><span style="color:#882299">Rp</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l9"></canvas><span style="color:#aa8800">ωLs</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l6"></canvas><span style="color:#887700">fs ⇔drag</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l7"></canvas><span style="color:#cc3399">fp ⇔drag</span></div>
+  <div class="leg"><canvas width="36" height="10" id="l8"></canvas><span style="color:#cc0000">Phase</span></div>
+</div>
+<div id="cursorTip"></div>
+<div id="outer"><div id="container">
+  <div id="col-circuit" style="display:flex;flex-direction:column;flex:0 0 22%;min-width:160px;border-right:2px solid #ddd;background:#fafafa;align-items:stretch;padding:10px 8px;gap:8px;">
+    <div style="font-size:10px;font-family:monospace;color:#666;text-align:center;font-weight:bold;">BVD Model</div>
+    <div id="svgScaleWrap" style="width:100%;overflow:hidden;border:1px solid #ddd;border-radius:4px;background:#fff;">
+    <svg width="830" height="985" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" overflow="hidden"><g transform="translate(-1434 -1127)"><g><rect id="svgLs" x="1434" y="1127" width="185" height="380" rx="8" fill="rgba(0,0,0,0)" stroke="none"/>
+<rect id="svgRs" x="1434" y="1490" width="185" height="260" rx="8" fill="rgba(0,0,0,0)" stroke="none"/>
+<rect id="svgCs" x="1434" y="1716" width="185" height="396" rx="8" fill="rgba(0,0,0,0)" stroke="none"/>
+<rect id="svgCp" x="1731" y="1490" width="210" height="520" rx="8" fill="rgba(0,0,0,0)" stroke="none"/>
+<rect id="svgRp" x="1990" y="1490" width="274" height="520" rx="8" fill="rgba(0,0,0,0)" stroke="none"/><path d="M1482.5 1281.5 1482.5 1131.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M1482.5 1498.5 1482.5 1422.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 33.213C1.13265 29.4413 2.61925 16.1055 6.80234 10.5744 10.9919 5.04329 19.2143-0.306149 25.1178 0.0142869 31.0235 0.334722 38.7032 7.07203 42.232 12.4868 45.7586 17.8995 46.2563 27.6146 46.2971 32.513 46.3357 37.4093 44.2012 40.1198 42.4658 41.8811 40.7325 43.6425 37.6349 43.7792 35.8866 43.0792 34.1468 42.3853 32.6474 39.6422 31.9995 37.6971 31.3517 35.752 31.9995 32.466 31.9995 31.419" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(0.00264068 0.999997 0.999997 -0.00264068 1450.44 1281.2)"/><path d="M0 33.213C1.13265 29.4413 2.61925 16.1055 6.80234 10.5744 10.9919 5.04329 19.2143-0.306149 25.1178 0.0142869 31.0235 0.334722 38.7032 7.07203 42.232 12.4868 45.7586 17.8995 46.2563 27.6146 46.2971 32.513 46.3357 37.4093 44.2012 40.1198 42.4658 41.8811 40.7325 43.6425 37.6349 43.7792 35.8866 43.0792 34.1468 42.3853 32.6474 39.6422 31.9995 37.6971 31.3517 35.752 31.9995 32.466 31.9995 31.419" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(0.00264068 0.999997 0.999997 -0.00264068 1449.63 1313.03)"/><path d="M0 33.213C1.13265 29.4413 2.61925 16.1055 6.80234 10.5744 10.9919 5.04329 19.2143-0.306149 25.1178 0.0142869 31.0235 0.334722 38.7032 7.07203 42.232 12.4868 45.7586 17.8995 46.2563 27.6146 46.2971 32.513 46.3357 37.4093 44.2012 40.1198 42.4658 41.8811 40.7325 43.6425 37.6349 43.7792 35.8866 43.0792 34.1468 42.3853 32.6474 39.6422 31.9995 37.6971 31.3517 35.752 31.9995 32.466 31.9995 31.419" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(0.00264068 0.999997 0.999997 -0.00264068 1450.16 1344.74)"/><path d="M1484.02 1422.57C1480.25 1421.44 1466.91 1419.99 1461.37 1415.83 1455.83 1411.65 1450.45 1403.44 1450.76 1397.54 1451.06 1391.63 1457.78 1383.93 1463.19 1380.39 1468.59 1376.85 1478.3 1376.33 1483.2 1376.27 1488.1 1376.22 1490.81 1378.35 1492.58 1380.08 1494.35 1381.81 1494.49 1384.9 1493.8 1386.66 1493.11 1388.4 1490.37 1389.9 1488.42 1390.56 1486.48 1391.21 1483.19 1390.57 1482.15 1390.57" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="64" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1530.1 1374)">L</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="43" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1565.62 1389)">S</text><path d="M0 0 7.64334 25.662" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-6.12323e-17 -1 -1 6.12323e-17 1481.16 1619.14)"/><path d="M1481.66 1721.03 1481.5 1619.5" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M1457.5 1611.5 1508.51 1595.5" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 7.64334 25.662" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-6.12323e-17 -1 -1 6.12323e-17 1508.16 1595.14)"/><path d="M0 0 0.15771 94.5202" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(1 -1.22465e-16 -1.22465e-16 -1 1482.5 1587.02)"/><path d="M1481.5 1716.5 1481.5 1846.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M1481.5 1874.5 1481.5 2108.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 80.0001 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 1521.5 1846.5)"/><path d="M0 0 80.0001 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 1521.5 1874.5)"/><path d="M0 0 7.6437 25.662" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(1.83697e-16 1 1 -1.83697e-16 2116.5 1542.5)"/><path d="M2142.51 1550.5 2091.5 1566.5" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M2116.5 1209.5 2116.5 1542.33" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 15.9994 51.0085" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-6.12323e-17 -1 -1 6.12323e-17 2142.51 1582.5)"/><path d="M2142.51 1614.5 2091.5 1630.5" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 7.6437 25.662" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(1.83697e-16 1 1 -1.83697e-16 2090.5 1630.5)"/><path d="M2142.51 1582.5 2091.5 1598.5" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 15.9994 51.0085" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-6.12323e-17 -1 -1 6.12323e-17 2142.51 1614.5)"/><path d="M2116.5 1638.5 2116.5 2006.85" stroke="#0D0D0D" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="64" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1527.9 1627)">R</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="43" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1574.3 1642)">S</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="64" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1530.47 1884)">C</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="43" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1576.87 1899)">S</text><path d="M1803.5 1209.5 1803.5 1583.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M1803.5 1610.5 1803.5 2005.5" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd"/><path d="M0 0 144 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 1875.5 1583.5)"/><path d="M0 0 144 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 1875.5 1611.5)"/><path d="M0 0 637 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 2116.5 2005.5)"/><path d="M0 0 634 0.000360892" stroke="#171717" stroke-width="4.58333" stroke-linecap="butt" stroke-linejoin="round" stroke-miterlimit="10" stroke-opacity="1" fill="none" fill-rule="evenodd" transform="matrix(-1 0 0 1 2116.5 1209.5)"/><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="64" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 2161.74 1615)">R</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="43" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 2208.14 1630)">P</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="64" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1884.63 1615)">C</text><text fill="#000000" fill-opacity="1" font-family="Arial,Arial_MSFontService,sans-serif" font-style="normal" font-variant="normal" font-weight="400" font-stretch="normal" font-size="43" text-anchor="start" direction="ltr" writing-mode="lr-tb" unicode-bidi="normal" text-decoration="none" transform="matrix(1 0 0 1 1931.04 1630)">P</text></g></g></svg>
+  </div>
+  <script>
+  function scaleSvgToFit(){
+    const wrap = document.getElementById('svgScaleWrap');
+    const svg  = wrap.querySelector('svg');
+    if(!wrap||!svg) return;
+    const scale = wrap.clientWidth / 830;
+    svg.style.transformOrigin = 'top left';
+    svg.style.transform = 'scale(' + scale + ')';
+    svg.style.display = 'block';
+    wrap.style.height = Math.round(985 * scale) + 'px';
+  }
+  window.addEventListener('load', scaleSvgToFit);
+  window.addEventListener('resize', scaleSvgToFit);
+  </script>
+    <div id="freqReadout" style="font-family:monospace;font-size:10px;color:#333;background:#fff;border:1px solid #bbb;border-radius:4px;padding:4px 6px;width:100%;line-height:1.75;box-sizing:border-box;">
+      <div style="color:#888;font-size:9px;">hover to probe</div>
+      <div id="frFreq">f = —</div>
+      <div id="frZ">|Z| = —</div>
+      <div id="frPh">∠Z = —</div>
+      <div id="frDom" style="font-weight:bold;color:#444;font-size:9px;">—</div>
+    </div>
+  </div>
+  <div id="col-zoom">
+    <div class="panel-label">|Z| Zoom — log/log</div>
+    <canvas id="cZZ"></canvas>
+    <div class="divider"></div>
+    <div class="panel-label">Phase Zoom — log f</div>
+    <canvas id="cPZ"></canvas>
+  </div>
+  <div id="col-main">
+    <div class="panel-label">|Z| — log/log  (drag 1/ωCs line up/down, drag fs/fp left/right)</div>
+    <canvas id="cZ"></canvas>
+    <div class="divider"></div>
+    <div class="panel-label">Phase ∠Z — log f</div>
+    <canvas id="cP"></canvas>
+    <div id="dragHint"></div>
+  </div>
+</div></div>
+<div id="info">fs=— fp=—</div>
+
+<script>
+// ── Full colors ─────────────────────────────────────────────────────────────
+const COL_CP='#0a1a7a', COL_CP_HOV='#2244cc', COL_CS='#5599dd', COL_CS_HOV='#2277ff';
+const COL_FS='#887700', COL_FS_HOV='#ccaa00';
+const COL_FP='#cc3399', COL_FP_HOV='#ff44bb';
+const COL_RS='#bb5500', COL_RP='#882299';
+const COL_LS='#aa8800';
+const COL_PH='#cc0000';
+const FS=26;
+
+// ── Dim colors (20% opacity of originals) ────────────────────────────────────
+const DIM_CP ='rgba(10,26,122,0.20)';
+const DIM_CS ='rgba(85,153,221,0.20)';
+const DIM_FS ='rgba(136,119,0,0.22)';
+const DIM_FP ='rgba(204,51,153,0.22)';
+const DIM_RS ='rgba(187,85,0,0.22)';
+const DIM_RP ='rgba(136,34,153,0.22)';
+const DIM_LS ='rgba(170,136,0,0.22)';
+const DIM_REG='0.10';  // region shading opacity multiplier
+
+// ── Active lines tracker (set by cursor probe) ────────────────────────────────
+// 'cp','cs','ls','rs','rp','fs','fp', or null
+let activeLine = null;
+
+// Determine which line(s) are active based on dominant region
+function getActiveLines(f, fs, fp, p, phaseDeg){
+  const phase = phaseDeg !== undefined ? phaseDeg : 90;
+  const isResistive = Math.abs(phase) < 45;
+  const inInductive = f>fs && f<fp;
+  if(isResistive){
+    const distFs=Math.abs(Math.log10(f/fs)), distFp=Math.abs(Math.log10(f/fp));
+    return distFs<=distFp ? ['rs','fs'] : ['rp','fp'];
+  }
+  if(f<fs)        return ['cp','fs'];
+  if(inInductive) return ['ls','fs','fp'];
+  return p.Cs/p.Cp<0.05 ? ['cp','fp'] : ['cs','fp'];
+}
+
+// Is this line key currently active?
+function isActive(key){ return activeLine && activeLine.includes(key); }
+
+// Get draw color for a line key
+function lineCol(key, hovered){
+  const active = isActive(key);
+  if(hovered) return {
+    cp:COL_CP_HOV, cs:COL_CS_HOV, ls:'#ccaa00', rs:'#ff8800',
+    rp:'#cc44ff', fs:COL_FS_HOV, fp:COL_FP_HOV
+  }[key]||'#888';
+  if(active || activeLine===null) return {
+    cp:COL_CP, cs:COL_CS, ls:COL_LS, rs:COL_RS,
+    rp:COL_RP, fs:COL_FS, fp:COL_FP
+  }[key]||'#444';
+  return {
+    cp:DIM_CP, cs:DIM_CS, ls:DIM_LS, rs:DIM_RS,
+    rp:DIM_RP, fs:DIM_FS, fp:DIM_FP
+  }[key]||'rgba(100,100,100,0.2)';
+}
+const FMIN_CLAMP=1e2; // 10 kHz minimum
+
+function legLine(id,color,dash,lw){
+  const c=document.getElementById(id),x=c.getContext('2d');
+  x.strokeStyle=color;x.lineWidth=lw||2;
+  if(dash)x.setLineDash(dash);
+  x.beginPath();x.moveTo(0,5);x.lineTo(36,5);x.stroke();
+}
+legLine('l1','#000',[],3);legLine('l2',COL_CP,[7,3],2);legLine('l3',COL_CS,[4,3],2);
+legLine('l4','#bb5500',[4,2],2);legLine('l5','#882299',[4,2],2);
+legLine('l6',COL_FS,[6,3],1.8);legLine('l7',COL_FP,[6,3],1.8);legLine('l8',COL_PH,[],2);
+legLine('l9','#aa8800',[5,3],2);
+
+function setTypical(){
+  // Epson FC-135 Q13FC1350xxxx00 — real datasheet values
+  // fs=32.768kHz, Cs=3.4fF, Cp=1.0pF, Rs=70kΩ, Rp=500MΩ, Ls=6931H
+  document.getElementById('Rs').value=70000;
+  document.getElementById('Rp').value=500000;
+  document.getElementById('Cp').value=1.0;
+  document.getElementById('Cs').value=0.0034;
+  document.getElementById('Ls').value=6938434;
+  document.getElementById('btnTypical').classList.add('active');
+  document.getElementById('btnCs10').classList.remove('active');
+  draw();
+}
+function setCs10(){
+  const Cp=(+document.getElementById('Cp').value||1.0)*1e-12;
+  const CsOld=(+document.getElementById('Cs').value||0.0034)*1e-12;
+  const LsOld=(+document.getElementById('Ls').value||6938434)*1e-3;
+  const fsOld=1/(2*Math.PI*Math.sqrt(LsOld*CsOld));
+  const Cs=10*Cp, Ls=1/((2*Math.PI*fsOld)**2*Cs);
+  document.getElementById('Cs').value=(Cs*1e12).toFixed(4);
+  document.getElementById('Ls').value=(Ls*1e3).toFixed(0);
+  document.getElementById('btnCs10').classList.add('active');
+  document.getElementById('btnTypical').classList.remove('active');
+  draw();
+}
+
+const canvasZ =document.getElementById('cZ');  const ctxZ =canvasZ.getContext('2d');
+const canvasP =document.getElementById('cP');  const ctxP =canvasP.getContext('2d');
+const canvasZZ=document.getElementById('cZZ'); const ctxZZ=canvasZZ.getContext('2d');
+const canvasPZ=document.getElementById('cPZ'); const ctxPZ=canvasPZ.getContext('2d');
+const dragHint=document.getElementById('dragHint');
+
+// Drag state
+let dragMode=null; // null | 'cs' | 'cp' | 'fs' | 'fp' | 'rs' | 'rp'
+let csHover=false, cpHover=false, fsHover=false, fpHover=false, rsHover=false, rpHover=false;
+
+// Shared axis state (updated each draw)
+const AX={lMin:2,lMax:8,zMin:3,zMax:10,pad:{l:72,r:28,t:24,b:26}};
+
+function getP(){
+  const Rs=+document.getElementById('Rs').value||6.4;
+  const Rp=(+document.getElementById('Rp').value||500)*1e3;
+  const Cp=(+document.getElementById('Cp').value||28.68)*1e-12;
+  const Cs=Math.max((+document.getElementById('Cs').value||0.09972)*1e-12,1e-18);
+  const Ls=(+document.getElementById('Ls').value||2.546)*1e-3;
+  return{Rs,Rp,Cp,Cs,Ls};
+}
+
+// ── Axis transforms (main |Z| canvas) ──────────────────────
+function fxZ(f){
+  const p=AX.pad, pw=canvasZ.width-p.l-p.r;
+  return p.l+(Math.log10(Math.max(f,1e-9))-AX.lMin)/(AX.lMax-AX.lMin)*pw;
+}
+function fyZ(z){
+  const p=AX.pad, ph=canvasZ.height-p.t-p.b;
+  return p.t+ph-(Math.log10(Math.max(z,1e-9))-AX.zMin)/(AX.zMax-AX.zMin)*ph;
+}
+function xToF(canvasX){
+  const p=AX.pad, pw=canvasZ.width-p.l-p.r;
+  return Math.pow(10, AX.lMin+(canvasX-p.l)/pw*(AX.lMax-AX.lMin));
+}
+function yToLogZ(canvasY){
+  const p=AX.pad, ph=canvasZ.height-p.t-p.b;
+  return AX.zMin+(p.t+ph-canvasY)/ph*(AX.zMax-AX.zMin);
+}
+
+// ── Cs drag: vertical line, handle at mid-x ─────────────────
+function csLineY(canvasX){
+  const Cs=(+document.getElementById('Cs').value||0.09972)*1e-12;
+  const f=xToF(canvasX);
+  return fyZ(1/(2*Math.PI*f*Cs));
+}
+function isNearCs(my,mx){return Math.abs(my-csLineY(mx))<18;}
+
+// Cp line: 1/wCp = Z → same shape, use dark blue
+function cpLineY(canvasX){
+  const Cp=(+document.getElementById('Cp').value||28.68)*1e-12;
+  const f=xToF(canvasX);
+  return fyZ(1/(2*Math.PI*f*Cp));
+}
+function isNearCp(my,mx){return Math.abs(my-cpLineY(mx))<18;}
+
+// ── Rs / Rp drag: horizontal flat lines ─────────────────────
+function rsLineY(){
+  const Rs=+document.getElementById('Rs').value||70000;
+  return fyZ(Rs);
+}
+function rpLineY(){
+  const Rp=(+document.getElementById('Rp').value||500000)*1e3;
+  return fyZ(Rp);
+}
+function isNearRs(my,mx){
+  const p=AX.pad,pw=canvasZ.width-p.l-p.r;
+  const inX=(mx>=p.l&&mx<=canvasZ.width-p.r);
+  return inX&&Math.abs(my-rsLineY())<18;
+}
+function isNearRp(my,mx){
+  const p=AX.pad,pw=canvasZ.width-p.l-p.r;
+  const inX=(mx>=p.l&&mx<=canvasZ.width-p.r);
+  return inX&&Math.abs(my-rpLineY())<18;
+}
+// ── fs drag: vertical line at fs ────────────────────────────
+function fsLineX(){
+  const p=getP();
+  const fs=1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs));
+  return fxZ(fs);
+}
+function isNearFs(mx,my){
+  const x=fsLineX(), p=AX.pad, ph=canvasZ.height-p.t-p.b;
+  const inY=(my>=p.t&&my<=p.t+ph);
+  return inY&&Math.abs(mx-x)<18;
+}
+
+// ── fp drag: vertical line at fp ────────────────────────────
+function fpLineX(){
+  const p=getP();
+  const fs=1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs));
+  const fp=fs*Math.sqrt(1+p.Cs/p.Cp);
+  return fxZ(fp);
+}
+function isNearFp(mx,my){
+  const x=fpLineX(), pad=AX.pad, ph=canvasZ.height-pad.t-pad.b;
+  const inY=(my>=pad.t&&my<=pad.t+ph);
+  return inY&&Math.abs(mx-x)<18;
+}
+
+function getCursor(){
+  if(dragMode==='cs'||csHover||dragMode==='cp'||cpHover||dragMode==='rs'||rsHover||dragMode==='rp'||rpHover) return 'ns-resize';
+  if(dragMode==='fs'||fsHover||dragMode==='fp'||fpHover) return 'ew-resize';
+  return 'default';
+}
+
+// ── Handle triangles ────────────────────────────────────────
+// Vertical (up/down) for Cs — 2× larger: tw=20, th=16
+function drawVertHandle(ctx,x,y,col,hov,hovCol,label){
+  const c=hov?hovCol:col;
+  const gap=4,tw=10,th=20;
+  ctx.fillStyle=c;
+  ctx.beginPath();ctx.moveTo(x,y-gap-th);ctx.lineTo(x-tw,y-gap);ctx.lineTo(x+tw,y-gap);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(x,y+gap+th);ctx.lineTo(x-tw,y+gap);ctx.lineTo(x+tw,y+gap);ctx.closePath();ctx.fill();
+  // Big label above triangles
+  ctx.font=`bold ${FS*1.1}px monospace`;
+  ctx.fillStyle=c;
+  ctx.textAlign='center';
+  ctx.fillText(label,x,y-gap-th-6);
+  ctx.textAlign='left';
+}
+function drawHorizHandle(ctx,x,y,col,hov,hovCol,label){
+  const c=hov?hovCol:col;
+  const gap=5,tw=24,th=10;
+  ctx.fillStyle=c;
+  ctx.beginPath();ctx.moveTo(x-gap-tw,y);ctx.lineTo(x-gap,y-th);ctx.lineTo(x-gap,y+th);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(x+gap+tw,y);ctx.lineTo(x+gap,y-th);ctx.lineTo(x+gap,y+th);ctx.closePath();ctx.fill();
+  // Label below the line
+  ctx.font=`bold ${FS*1.1}px monospace`;
+  ctx.fillStyle=c;
+  ctx.textAlign='center';
+  ctx.fillText(label,x,y+th+gap+FS*1.2);
+  ctx.textAlign='left';
+}
+function drawCsHandle(ctx,x,y,hov){drawVertHandle(ctx,x,y,COL_CS,hov,COL_CS_HOV,'Cs');}
+function drawCpHandle(ctx,x,y,hov){drawVertHandle(ctx,x,y,COL_CP,hov,COL_CP_HOV,'Cp');}
+function drawRsHandle(ctx,x,y,hov){drawVertHandle(ctx,x,y,'#bb5500',hov,'#ff8800','Rs');}
+function drawRpHandle(ctx,x,y,hov){drawVertHandle(ctx,x,y,'#882299',hov,'#cc44ff','Rp');}
+// Horizontal (left/right) for fs/fp — 2× larger: tw=16, th=20
+// drawFHandle now delegates to drawHorizHandle
+function drawFHandle(ctx,x,y,col,hov,label,yOffset){
+  const hovCol=col===COL_FS?COL_FS_HOV:COL_FP_HOV;
+  drawHorizHandle(ctx,x,y+(yOffset||0),col,hov,hovCol,label||'');
+}
+
+// ── Mouse/touch handlers ─────────────────────────────────────
+function onMove(e){
+  const rect=canvasZ.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+
+  if(dragMode==='cs'){
+    // Dragging Cs: convert mouse Y+X to new Cs value
+    const logZ=yToLogZ(my);
+    const f=xToF(mx);
+    const newCs=Math.max(1/(2*Math.PI*f*Math.pow(10,logZ)), 1e-18);
+    if(newCs>1e-18&&newCs<1e-6){
+      document.getElementById('Cs').value=(newCs*1e12).toFixed(6);
+      clearPreset();
+      showHint(e,'Cs = '+(newCs*1e12).toFixed(4)+' pF');
+      draw(); return;
+    }
+  }
+  if(dragMode==='rs'){
+    const logZ=yToLogZ(my);
+    const newRs=Math.max(Math.pow(10,logZ), 0.01);
+    if(newRs>0.01&&newRs<1e9){
+      document.getElementById('Rs').value=newRs.toFixed(newRs<10?2:newRs<1000?1:0);
+      clearPreset(); showHint(e,'Rs = '+fmtOhm(newRs)); draw(); return;
+    }
+  }
+  if(dragMode==='rp'){
+    const logZ=yToLogZ(my);
+    const newRp=Math.max(Math.pow(10,logZ), 1e3);
+    if(newRp>1e3&&newRp<1e12){
+      document.getElementById('Rp').value=(newRp/1e3).toFixed(1);
+      clearPreset(); showHint(e,'Rp = '+fmtOhm(newRp)); draw(); return;
+    }
+  }
+  if(dragMode==='cp'){
+    const logZ=yToLogZ(my);
+    const f=xToF(mx);
+    const newCp=Math.max(1/(2*Math.PI*f*Math.pow(10,logZ)), 1e-18);
+    if(newCp>1e-15&&newCp<1e-6){
+      document.getElementById('Cp').value=(newCp*1e12).toFixed(4);
+      clearPreset();
+      showHint(e,'Cp = '+(newCp*1e12).toFixed(4)+' pF');
+      draw(); return;
+    }
+  }
+  if(dragMode==='fs'){
+    // Dragging fs: change Ls to move fs to mouse X frequency, keep fp/fs ratio
+    const newFs=Math.max(xToF(mx), FMIN_CLAMP);
+    const p=getP();
+    const Ls=1/((2*Math.PI*newFs)**2*p.Cs);
+    document.getElementById('Ls').value=(Ls*1e3).toFixed(6);
+    clearPreset();
+    showHint(e,'fs = '+fmtFreq(newFs));
+    draw(); return;
+  }
+  if(dragMode==='fp'){
+    // Dragging fp: change Cp so that fp = mouse X freq (keep fs fixed)
+    const p=getP();
+    const fs=1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs));
+    const newFp=Math.max(xToF(mx), fs*1.000001);
+    // fp = fs*sqrt(1+Cs/Cp) => Cp = Cs/((fp/fs)^2-1)
+    const ratio=(newFp/fs)**2-1;
+    if(ratio>0){
+      const newCp=p.Cs/ratio;
+      if(newCp>1e-15&&newCp<1e-6){
+        document.getElementById('Cp').value=(newCp*1e12).toFixed(4);
+        clearPreset();
+        showHint(e,'fp = '+fmtFreq(newFp));
+        draw(); return;
+      }
+    }
+  }
+
+  // Hover detection
+  const nc=isNearCs(my,mx),ncp=isNearCp(my,mx),nfs=isNearFs(mx,my),nfp=isNearFp(mx,my),nrs=isNearRs(my,mx),nrp=isNearRp(my,mx);
+  if(nc!==csHover||ncp!==cpHover||nfs!==fsHover||nfp!==fpHover||nrs!==rsHover||nrp!==rpHover){
+    csHover=nc;cpHover=ncp;fsHover=nfs;fpHover=nfp;rsHover=nrs;rpHover=nrp;
+    canvasZ.style.cursor=getCursor();
+    draw();
+  }
+}
+
+function onDown(e){
+  const rect=canvasZ.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  if(isNearFs(mx,my)){dragMode='fs';e.preventDefault();return;}
+  if(isNearFp(mx,my)){dragMode='fp';e.preventDefault();return;}
+  if(isNearRs(my,mx)){dragMode='rs';e.preventDefault();return;}
+  if(isNearRp(my,mx)){dragMode='rp';e.preventDefault();return;}
+  if(isNearCp(my,mx)){dragMode='cp';e.preventDefault();return;}
+  if(isNearCs(my,mx)){dragMode='cs';e.preventDefault();return;}
+}
+
+function onUp(){
+  if(dragMode){dragMode=null;dragHint.style.display='none';draw();}
+}
+
+function onLeave(){
+  if(!dragMode){csHover=false;cpHover=false;fsHover=false;fpHover=false;rsHover=false;rpHover=false;canvasZ.style.cursor='default';draw();}
+}
+
+function showHint(e,txt){
+  dragHint.style.display='block';
+  dragHint.style.left=(e.clientX+16)+'px';
+  dragHint.style.top=(e.clientY-28)+'px';
+  dragHint.textContent=txt;
+}
+function clearPreset(){
+  document.getElementById('btnTypical').classList.remove('active');
+  document.getElementById('btnCs10').classList.remove('active');
+}
+
+canvasZ.addEventListener('mousemove',onMove);
+canvasZ.addEventListener('mousedown',onDown);
+window.addEventListener('mouseup',onUp);
+canvasZ.addEventListener('mouseleave',onLeave);
+
+// Touch
+function touchCoords(e){
+  const rect=canvasZ.getBoundingClientRect();
+  return{clientX:e.touches[0].clientX,clientY:e.touches[0].clientY,
+         mx:e.touches[0].clientX-rect.left, my:e.touches[0].clientY-rect.top};
+}
+canvasZ.addEventListener('touchstart',e=>{
+  const {mx,my}=touchCoords(e);
+  const fe={clientX:e.touches[0].clientX,clientY:e.touches[0].clientY,preventDefault:()=>e.preventDefault()};
+  if(isNearFs(mx,my)){dragMode='fs';e.preventDefault();return;}
+  if(isNearFp(mx,my)){dragMode='fp';e.preventDefault();return;}
+  if(isNearRs(my,mx)){dragMode='rs';e.preventDefault();return;}
+  if(isNearRp(my,mx)){dragMode='rp';e.preventDefault();return;}
+  if(isNearCp(my,mx)){dragMode='cp';e.preventDefault();return;}
+  if(isNearCs(my,mx)){dragMode='cs';e.preventDefault();}
+},{passive:false});
+canvasZ.addEventListener('touchmove',e=>{
+  if(!dragMode)return;e.preventDefault();
+  const {clientX,clientY,mx,my}=touchCoords(e);
+  onMove({clientX,clientY,preventDefault:()=>{}});
+},{passive:false});
+window.addEventListener('touchend',()=>{dragMode=null;dragHint.style.display='none';draw();});
+
+// ── fs/fp drag on zoom |Z| canvas ──────────────────────────
+function fxZZfn(f,lZMin,lZMax,W,pad){
+  return pad.l+(Math.log10(Math.max(f,1e-9))-lZMin)/(lZMax-lZMin)*(W-pad.l-pad.r);
+}
+// Store last zoom axis params so zoom canvas handlers can use them
+let lastLZMin=0,lastLZMax=1,lastPadZZ={l:100,r:14,t:30,b:48};
+let zoomFsHover=false,zoomFpHover=false;
+
+function isNearZoomFs(mx,my,W,H){
+  const pw=W-lastPadZZ.l-lastPadZZ.r, ph=H-lastPadZZ.t-lastPadZZ.b;
+  const p=getP(),fs=Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)),FMIN_CLAMP);
+  const x=lastPadZZ.l+(Math.log10(Math.max(fs,1e-9))-lastLZMin)/(lastLZMax-lastLZMin)*pw;
+  return Math.abs(mx-x)<18&&my>=lastPadZZ.t&&my<=lastPadZZ.t+ph;
+}
+function isNearZoomFp(mx,my,W,H){
+  const pw=W-lastPadZZ.l-lastPadZZ.r, ph=H-lastPadZZ.t-lastPadZZ.b;
+  const p=getP(),fs=Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)),FMIN_CLAMP);
+  const fp=fs*Math.sqrt(1+p.Cs/p.Cp);
+  const x=lastPadZZ.l+(Math.log10(Math.max(fp,1e-9))-lastLZMin)/(lastLZMax-lastLZMin)*pw;
+  return Math.abs(mx-x)<18&&my>=lastPadZZ.t&&my<=lastPadZZ.t+ph;
+}
+function zoomXtoF(mx,W){
+  const pw=W-lastPadZZ.l-lastPadZZ.r;
+  return Math.max(Math.pow(10,lastLZMin+(mx-lastPadZZ.l)/pw*(lastLZMax-lastLZMin)),FMIN_CLAMP);
+}
+
+canvasZZ.addEventListener('mousemove',e=>{
+  const rect=canvasZZ.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  const W=canvasZZ.width,H=canvasZZ.height;
+  if(dragMode==='fs'){
+    const newFs=Math.max(zoomXtoF(mx,W),FMIN_CLAMP);
+    const p=getP();
+    const Ls=1/((2*Math.PI*newFs)**2*p.Cs);
+    document.getElementById('Ls').value=(Ls*1e3).toFixed(0);
+    clearPreset(); showHint(e,'fs = '+fmtFreq(newFs)); draw(); return;
+  }
+  if(dragMode==='fp'){
+    const p=getP(),fs=Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)),FMIN_CLAMP);
+    const newFp=Math.max(zoomXtoF(mx,W),fs*1.000001);
+    const ratio=(newFp/fs)**2-1;
+    if(ratio>0){
+      const newCp=p.Cs/ratio;
+      if(newCp>1e-15&&newCp<1e-6){
+        document.getElementById('Cp').value=(newCp*1e12).toFixed(4);
+        clearPreset(); showHint(e,'fp = '+fmtFreq(newFp)); draw(); return;
+      }
+    }
+  }
+  const nfs=isNearZoomFs(mx,my,W,H),nfp=isNearZoomFp(mx,my,W,H);
+  if(nfs!==zoomFsHover||nfp!==zoomFpHover){
+    zoomFsHover=nfs;zoomFpHover=nfp;
+    canvasZZ.style.cursor=(nfs||nfp)?'ew-resize':'default';
+  }
+});
+canvasZZ.addEventListener('mousedown',e=>{
+  const rect=canvasZZ.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  const W=canvasZZ.width,H=canvasZZ.height;
+  if(isNearZoomFs(mx,my,W,H)){dragMode='fs';e.preventDefault();return;}
+  if(isNearZoomFp(mx,my,W,H)){dragMode='fp';e.preventDefault();return;}
+});
+canvasZZ.addEventListener('mouseleave',()=>{zoomFsHover=false;zoomFpHover=false;canvasZZ.style.cursor='default';});
+
+// ── Resize ───────────────────────────────────────────────────
+function resize(){
+  const totalW=Math.min(document.getElementById('container').offsetWidth,1200);
+  const WCircuit=Math.round(totalW*0.22);
+  const WZoom=Math.round(totalW*0.26);
+  const WZ=totalW-WCircuit-WZoom;
+
+  // Use available vertical space, clamped between min and max
+  const controlH=document.getElementById('controls').offsetHeight;
+  const legendH=document.getElementById('legend').offsetHeight;
+  const infoH=24;
+  const overhead=controlH+legendH+infoH+20; // panel labels + dividers
+  const availH=Math.max(0, window.innerHeight-overhead);
+
+  // |Z| gets 58% of available height, phase 38%, rest is chrome
+  const HZ=Math.max(180, Math.round(availH*0.56));
+  const HP=Math.max(110, Math.round(availH*0.37));
+
+  canvasZ.width=WZ;    canvasZ.height=HZ;
+  canvasP.width=WZ;    canvasP.height=HP;
+  canvasZZ.width=WZoom; canvasZZ.height=HZ;
+  canvasPZ.width=WZoom; canvasPZ.height=HP;
+  draw();
+}
+
+// ── Impedance ────────────────────────────────────────────────
+function zComplex(f,{Rs,Rp,Cp,Cs,Ls}){
+  const w=2*Math.PI*f;
+  const zCp_i=-1/(w*Cp);
+  const dp_r=Rp,dp_i=zCp_i,dp_m=dp_r*dp_r+dp_i*dp_i;
+  const Zp_r=(Rp*zCp_i*dp_i)/dp_m-(0), Zp_i2=Rp*zCp_i;
+  // Rp*ZC0/(Rp+ZC0): nr=0+j*Rp*zCp_i, den=Rp+j*zCp_i
+  const nr=0,ni=Rp*zCp_i;
+  const Zpr=(nr*dp_r+ni*dp_i)/dp_m, Zpi=(ni*dp_r-nr*dp_i)/dp_m;
+  const Zmr=Rs, Zmi=w*Ls-1/(w*Cs);
+  const dt_r=Zpr+Zmr,dt_i=Zpi+Zmi,dt_m=dt_r*dt_r+dt_i*dt_i;
+  const nt_r=Zpr*Zmr-Zpi*Zmi, nt_i=Zpr*Zmi+Zpi*Zmr;
+  const Zr=(nt_r*dt_r+nt_i*dt_i)/dt_m, Zi=(nt_i*dt_r-nt_r*dt_i)/dt_m;
+  return[Math.sqrt(Zr*Zr+Zi*Zi), Math.atan2(Zi,Zr)*180/Math.PI];
+}
+
+function strokeCurve(ctx,xs,ys,color,dash,lw,jumpThresh){
+  ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.setLineDash(dash||[]);
+  ctx.beginPath();let pen=false,prevY=null;
+  for(let i=0;i<xs.length;i++){
+    const x=xs[i],y=ys[i];
+    if(!isFinite(y)||isNaN(y)){pen=false;continue;}
+    if(prevY!==null&&Math.abs(y-prevY)>jumpThresh){ctx.stroke();ctx.beginPath();pen=false;}
+    if(!pen){ctx.moveTo(x,y);pen=true;}else ctx.lineTo(x,y);
+    prevY=y;
+  }
+  ctx.stroke();ctx.setLineDash([]);
+}
+
+// Context-aware: enough decimals so fs and fp look different given gap df
+function fmtFreqCtx(f, df){
+  let unit, scale;
+  if(f>=1e9){unit='GHz';scale=1e9;}
+  else if(f>=1e6){unit='MHz';scale=1e6;}
+  else if(f>=1e3){unit='kHz';scale=1e3;}
+  else{unit='Hz';scale=1;}
+  const dfInUnit=Math.max(df/scale, 1e-12);
+  const decimals=Math.max(1, Math.min(7, Math.ceil(-Math.log10(dfInUnit))+1));
+  return (f/scale).toFixed(decimals)+unit;
+}
+function fmtFreq(f){
+  if(f>=1e9)return(f/1e9).toFixed(1)+'GHz';
+  if(f>=1e6)return(f/1e6).toFixed(1)+'MHz';
+  if(f>=1e3)return(f/1e3).toFixed(1)+'kHz';
+  return f.toFixed(1)+'Hz';
+}
+function fmtOhm(r){
+  if(r>=1e9)return(r/1e9).toFixed(2)+'GΩ';
+  if(r>=1e6)return(r/1e6).toFixed(2)+'MΩ';
+  if(r>=1e3)return(r/1e3).toFixed(1)+'kΩ';
+  return r.toFixed(1)+'Ω';
+}
+
+// ── Generic panel helper ─────────────────────────────────────
+function drawPanel(ctx,W,H,pad,lMin,lMax,zMin_log,zMax_log,shadeFs,shadeFp,logX){
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  const pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  function fx(f){
+    if(logX) return pad.l+(Math.log10(Math.max(f,1e-9))-lMin)/(lMax-lMin)*pw;
+    return pad.l+(f-Math.pow(10,lMin))/(Math.pow(10,lMax)-Math.pow(10,lMin))*pw;
+  }
+  const xfs=fx(shadeFs), xfp=fx(shadeFp);
+  ctx.fillStyle='rgba(10,30,110,0.13)';ctx.fillRect(pad.l,pad.t,xfs-pad.l,ph);
+  ctx.fillStyle='rgba(180,140,0,0.14)'; ctx.fillRect(xfs,pad.t,xfp-xfs,ph);
+  ctx.fillStyle='rgba(10,30,110,0.13)'; ctx.fillRect(xfp,pad.t,W-pad.r-xfp,ph);
+  return{pw,ph,fx};
+}
+
+// ── MAIN DRAW ────────────────────────────────────────────────
+function draw(){
+  const p=getP();
+  const{Rs,Rp,Cp,Cs,Ls}=p;
+  const fs=Math.max(1/(2*Math.PI*Math.sqrt(Ls*Cs)), FMIN_CLAMP);
+  const fp=fs*Math.sqrt(1+Cs/Cp);
+  const gap=Math.max(fp-fs, 1e-3);
+
+  const fMin=1e2,fMax=1e8;
+  const lMin=Math.log10(fMin),lMax=Math.log10(fMax);
+  AX.lMin=lMin;AX.lMax=lMax;
+
+  // Freq arrays
+  function buildFreqs(){
+    const pts=[];
+    for(let i=0;i<=3000;i++)pts.push(Math.pow(10,lMin+(lMax-lMin)*i/3000));
+    const bw1=fs*0.005;
+    for(let i=0;i<=2000;i++)pts.push(fs-bw1+2*bw1*i/2000);
+    const bw2=fp*0.005;
+    for(let i=0;i<=2000;i++)pts.push(fp-bw2+2*bw2*i/2000);
+    const flo=Math.pow(10,lMin),fhi=Math.pow(10,lMax);
+    return[...new Set(pts.map(f=>+Math.max(flo,Math.min(fhi,f)).toPrecision(9)))].sort((a,b)=>a-b);
+  }
+  const freqs=buildFreqs(), N=freqs.length;
+  const data=freqs.map(f=>zComplex(f,p));
+  const zT=data.map(d=>d[0]), phT=data.map(d=>d[1]);
+  const zCpV=freqs.map(f=>1/(2*Math.PI*f*Cp));
+  const zCsV=freqs.map(f=>1/(2*Math.PI*f*Cs));
+  const zLsV=freqs.map(f=>2*Math.PI*f*Ls);  // |Z_Ls| = wLs, slope +1
+
+  // Zoom range
+  const span=Math.max(fp-fs, fs*1e-6);
+  const fZMin=Math.max(fs-0.5*span, FMIN_CLAMP);
+  const fZMax=fp+0.5*span;
+  const lZMin=Math.log10(Math.max(fZMin,1e-9)), lZMax=Math.log10(Math.max(fZMax,1e-9));
+  const NZ=4000;
+  const zoomFreqs=Array.from({length:NZ},(_,i)=>Math.pow(10,lZMin+(lZMax-lZMin)*i/(NZ-1)));
+  const zoomData=zoomFreqs.map(f=>zComplex(f,p));
+  const zoomZT=zoomData.map(d=>d[0]), zoomPhT=zoomData.map(d=>d[1]);
+
+  const zMin_log=3, zMax_log=10;
+  AX.zMin=zMin_log; AX.zMax=zMax_log;
+
+  // ═══════════════ MAIN |Z| ═══════════════════════════════════
+  const WZ=canvasZ.width, HZ=canvasZ.height;
+  const padZ={l:100,r:32,t:30,b:32};
+  AX.pad=padZ;
+  const pwZ=WZ-padZ.l-padZ.r, phZ=HZ-padZ.t-padZ.b;
+
+  function fxMZ(f){return padZ.l+(Math.log10(Math.max(f,1e-9))-lMin)/(lMax-lMin)*pwZ;}
+  function fyMZ(z){return padZ.t+phZ-(Math.log10(Math.max(z,1e-9))-zMin_log)/(zMax_log-zMin_log)*phZ;}
+  function inBZ(y){return y>=padZ.t-40&&y<=padZ.t+phZ+40;}
+
+  ctxZ.fillStyle='#fff';ctxZ.fillRect(0,0,WZ,HZ);
+  const xfsZ=fxMZ(fs),xfpZ=fxMZ(fp);
+  const xfpZd=Math.max(xfpZ,xfsZ+5); // display: min 5px band
+  ctxZ.fillStyle=`rgba(10,30,110,${isActive('cp')||activeLine===null?0.13:0.04})`; ctxZ.fillRect(padZ.l,padZ.t,xfsZ-padZ.l,phZ);
+  ctxZ.fillStyle=`rgba(200,170,0,${isActive('ls')||activeLine===null?0.13:0.04})`;ctxZ.fillRect(xfsZ,padZ.t,xfpZd-xfsZ,phZ);
+  ctxZ.fillStyle=Cs/Cp<0.05?`rgba(10,30,110,${isActive('cp')||activeLine===null?0.13:0.04})`:`rgba(40,160,140,${isActive('cs')||activeLine===null?0.18:0.05})`; ctxZ.fillRect(xfpZd,padZ.t,WZ-padZ.r-xfpZd,phZ);
+
+  const rightLbl=Cs/Cp<0.05?'Cp dom.':'Cs dom.';
+  const rightCol=Cs/Cp<0.05?'#0a2060':'#0a7060';
+  ctxZ.font=`bold ${FS*0.65}px monospace`;
+  ctxZ.fillStyle='#0a2060';ctxZ.fillText('Cp dom.',padZ.l+4,padZ.t+FS*0.9);
+  ctxZ.font=`${FS*0.54}px monospace`;
+  ctxZ.fillStyle='#0a2060';ctxZ.fillText('capacitive',padZ.l+4,padZ.t+FS*1.65);
+  ctxZ.font=`bold ${FS*0.65}px monospace`;
+  ctxZ.fillStyle='#886600';ctxZ.fillText('Ls dom.',xfsZ+4,padZ.t+FS*0.9);
+  ctxZ.font=`${FS*0.54}px monospace`;
+  ctxZ.fillStyle='#886600';ctxZ.fillText('inductive',xfsZ+4,padZ.t+FS*1.65);
+  ctxZ.font=`bold ${FS*0.65}px monospace`;
+  ctxZ.fillStyle=rightCol;ctxZ.fillText(rightLbl,xfpZd+4,padZ.t+FS*0.9);
+  ctxZ.font=`${FS*0.54}px monospace`;
+  ctxZ.fillStyle=rightCol;ctxZ.fillText('capacitive',xfpZd+4,padZ.t+FS*1.65);
+
+  // Y grid
+  ctxZ.textAlign='right';
+  for(let e=zMin_log;e<=zMax_log;e++){
+    const y=fyMZ(Math.pow(10,e));if(!inBZ(y))continue;
+    ctxZ.strokeStyle='#ccc';ctxZ.lineWidth=1;ctxZ.setLineDash([]);
+    ctxZ.beginPath();ctxZ.moveTo(padZ.l,y);ctxZ.lineTo(WZ-padZ.r,y);ctxZ.stroke();
+    for(let m=2;m<=9;m++){const ym=fyMZ(m*Math.pow(10,e));if(inBZ(ym)){ctxZ.strokeStyle='#eee';ctxZ.beginPath();ctxZ.moveTo(padZ.l,ym);ctxZ.lineTo(WZ-padZ.r,ym);ctxZ.stroke();}}
+    const v=Math.pow(10,e);
+    ctxZ.fillStyle='#555';ctxZ.font=`${FS*0.6}px monospace`;
+    ctxZ.fillText(v>=1e6?(v/1e6).toFixed(0)+'MΩ':v>=1e3?(v/1e3).toFixed(0)+'kΩ':v+'Ω',padZ.l-3,y+4);
+  }
+  // X grid
+  ctxZ.textAlign='center';
+  for(let e=Math.floor(lMin);e<=Math.ceil(lMax);e++){
+    const x=fxMZ(Math.pow(10,e));if(x<padZ.l||x>WZ-padZ.r)continue;
+    ctxZ.strokeStyle='#ccc';ctxZ.lineWidth=1;ctxZ.setLineDash([]);
+    ctxZ.beginPath();ctxZ.moveTo(x,padZ.t);ctxZ.lineTo(x,padZ.t+phZ);ctxZ.stroke();
+    for(let m=2;m<=9;m++){const xm=fxMZ(m*Math.pow(10,e));if(xm>=padZ.l&&xm<=WZ-padZ.r){ctxZ.strokeStyle='#eee';ctxZ.beginPath();ctxZ.moveTo(xm,padZ.t);ctxZ.lineTo(xm,padZ.t+phZ);ctxZ.stroke();}}
+    const fv=Math.pow(10,e);
+    ctxZ.fillStyle='#555';ctxZ.font=`${FS*0.6}px monospace`;
+    ctxZ.fillText(fv>=1e6?(fv/1e6).toFixed(0)+'M':fv>=1e3?(fv/1e3).toFixed(0)+'k':fv+'',x,padZ.t+phZ+FS*0.95);
+  }
+  ctxZ.textAlign='left';
+
+  // Curves
+  const xs=freqs.map(f=>fxMZ(f));
+  const cpCol=lineCol('cp',dragMode==='cp'||cpHover);
+  strokeCurve(ctxZ,xs,zCpV.map(z=>fyMZ(z)),cpCol,[7,3],(dragMode==='cp'||cpHover)?3.5:2,phZ*0.5);
+  const csCol=lineCol('cs',dragMode==='cs'||csHover);
+  strokeCurve(ctxZ,xs,zCsV.map(z=>fyMZ(z)),csCol,[4,3],(dragMode==='cs'||csHover)?3.5:2,phZ*0.5);
+  // Ls impedance: ωLs — dark yellow, slope +1 on log-log
+  strokeCurve(ctxZ,xs,zLsV.map(z=>fyMZ(z)),lineCol('ls',false),[5,3],2,phZ*0.5);
+
+  // Slope labels
+  function slopeLbl(vals,color,label){
+    for(let i=N-1;i>N/2;i--){
+      const y=fyMZ(vals[i]);
+      if(inBZ(y)&&y>padZ.t+10&&y<padZ.t+phZ-10){
+        ctxZ.fillStyle=color;ctxZ.font=`bold ${FS*0.6}px monospace`;
+        ctxZ.textAlign='right';ctxZ.fillText(label,fxMZ(freqs[i])-4,y-5);
+        ctxZ.textAlign='left';return;
+      }
+    }
+  }
+  slopeLbl(zCpV,cpCol,'1/ωCp');
+  slopeLbl(zCsV,csCol,'1/ωCs');
+  // ωLs label: rising line, find a point near center that's in bounds
+  {
+    for(let i=Math.floor(N/3);i<N*2/3;i++){
+      const y=fyMZ(zLsV[i]);
+      if(inBZ(y)&&y>padZ.t+10&&y<padZ.t+phZ-10){
+        ctxZ.fillStyle=lineCol('ls',false);ctxZ.font=`bold ${FS*0.6}px monospace`;
+        ctxZ.textAlign='left';ctxZ.fillText('ωLs',fxMZ(freqs[i])+4,y-5);
+        break;
+      }
+    }
+  }
+
+  // hlines
+  function hlineZ(val,color,label){
+    const y=fyMZ(val);if(!inBZ(y))return;
+    ctxZ.strokeStyle=color;ctxZ.lineWidth=1.5;ctxZ.setLineDash([5,3]);
+    ctxZ.beginPath();ctxZ.moveTo(padZ.l,y);ctxZ.lineTo(WZ-padZ.r,y);ctxZ.stroke();
+    ctxZ.setLineDash([]);
+    ctxZ.fillStyle=color;ctxZ.font=`bold ${FS*0.6}px monospace`;
+    ctxZ.fillText(label,WZ-padZ.r-72,y-3);
+  }
+  hlineZ(Rs,lineCol('rs',dragMode==='rs'||rsHover),'Rs='+fmtOhm(Rs));
+  hlineZ(Rp,lineCol('rp',dragMode==='rp'||rpHover),'Rp='+fmtOhm(Rp*1e3));
+  // Rs/Rp drag handles
+  const rsHX=fxMZ(Math.pow(10,lMin+(lMax-lMin)*0.75));
+  const rsHY=fyMZ(Rs);
+  const rpHX=fxMZ(Math.pow(10,lMin+(lMax-lMin)*0.80));
+  const rpHY=fyMZ(Rp*1e3);
+  if(inBZ(rsHY)){ctxZ.globalAlpha=isActive('rs')||activeLine===null||dragMode==='rs'||rsHover?1:0.25;drawRsHandle(ctxZ,rsHX,rsHY,(dragMode==='rs'||rsHover));ctxZ.globalAlpha=1;}
+  if(inBZ(rpHY)){ctxZ.globalAlpha=isActive('rp')||activeLine===null||dragMode==='rp'||rpHover?1:0.25;drawRpHandle(ctxZ,rpHX,rpHY,(dragMode==='rp'||rpHover));ctxZ.globalAlpha=1;}
+
+  // Main |Z| curve
+  strokeCurve(ctxZ,xs,zT.map(z=>fyMZ(z)),'#000',[],2.8,phZ*0.5);
+
+  // fs/fp vlines + handles (drawn AFTER curves so they're on top)
+  const handleY=padZ.t+phZ*0.5; // vertical center for horizontal handles
+  function vlineAndHandle(xPos,col,hovCol,label,hov,handleLabel){
+    const isHov=(dragMode===(label==='fs'?'fs':'fp'))||hov;
+    const isFs=(label==='fs');
+    ctxZ.strokeStyle=isHov?hovCol:col;ctxZ.lineWidth=isHov?2.5:1.5;ctxZ.setLineDash([6,3]);
+    ctxZ.beginPath();ctxZ.moveTo(xPos,padZ.t);ctxZ.lineTo(xPos,padZ.t+phZ);ctxZ.stroke();
+    ctxZ.setLineDash([]);
+    ctxZ.fillStyle=isHov?hovCol:col;ctxZ.font=`bold ${FS*0.72}px monospace`;
+    // fs: shift left + higher; fp: shift right + lower (avoid overlap)
+    const lx = isFs ? xPos - FS*1.8 : xPos + FS*0.3;
+    const ly = isFs ? padZ.t+FS*1.2  : padZ.t+FS*2.4;
+    ctxZ.fillText(label,lx,ly);
+    drawFHandle(ctxZ,xPos,handleY,col,isHov,handleLabel||label,isFs?0:FS*2.5);
+  }
+  vlineAndHandle(xfsZ,lineCol('fs',false),lineCol('fs',true),'fs',fsHover,'fs');
+  vlineAndHandle(xfpZd,lineCol('fp',false),lineCol('fp',true),'fp',fpHover,'fp');
+  ctxZ.font=`bold ${FS*0.58}px monospace`;
+  ctxZ.fillStyle=COL_FS;ctxZ.textAlign='center';
+  ctxZ.fillText(fmtFreqCtx(fs,gap),xfsZ,padZ.t+phZ-FS*0.3);
+  ctxZ.textAlign='left';
+
+  // Cs handle (on top of everything)
+  const hFrac=0.65;
+  const hF=Math.pow(10,lMin+(lMax-lMin)*hFrac);
+  const hX=fxMZ(hF), hY=fyMZ(1/(2*Math.PI*hF*Cs));
+  {const csAlpha=isActive('cs')||activeLine===null||dragMode==='cs'||csHover?1:0.25;ctxZ.globalAlpha=csAlpha;if(inBZ(hY))drawCsHandle(ctxZ,hX,hY,(dragMode==='cs'||csHover));ctxZ.globalAlpha=1;}
+
+  // Cp drag handle
+  const hCpF=Math.pow(10,lMin+(lMax-lMin)*0.20);
+  const hCpX=fxMZ(hCpF), hCpY=fyMZ(1/(2*Math.PI*hCpF*Cp));
+  {const cpAlpha=isActive('cp')||activeLine===null||dragMode==='cp'||cpHover?1:0.25;ctxZ.globalAlpha=cpAlpha;if(inBZ(hCpY))drawCpHandle(ctxZ,hCpX,hCpY,(dragMode==='cp'||cpHover));ctxZ.globalAlpha=1;}
+
+  ctxZ.fillStyle='#444';ctxZ.font=`${FS*0.7}px monospace`;
+  ctxZ.save();ctxZ.translate(FS*0.7,padZ.t+phZ/2);ctxZ.rotate(-Math.PI/2);
+  ctxZ.textAlign='center';ctxZ.fillText('|Z| (Ω)',0,0);ctxZ.restore();
+  ctxZ.strokeStyle='#999';ctxZ.lineWidth=1;ctxZ.setLineDash([]);
+  ctxZ.strokeRect(padZ.l,padZ.t,pwZ,phZ);
+
+  // ═══════════════ MAIN Phase ══════════════════════════════════
+  const WP=canvasP.width,HP=canvasP.height;
+  const padP={l:100,r:32,t:14,b:48};
+  const pwP=WP-padP.l-padP.r,phpH=HP-padP.t-padP.b;
+  function fxMP(f){return padP.l+(Math.log10(Math.max(f,1e-9))-lMin)/(lMax-lMin)*pwP;}
+  function fyMP(d){return padP.t+phpH-(d+90)/180*phpH;}
+
+  ctxP.fillStyle='#fff';ctxP.fillRect(0,0,WP,HP);
+  const xfsP=fxMP(fs),xfpP=fxMP(fp);
+  const xfpPd=Math.max(xfpP,xfsP+5); // display: min 5px band
+  ctxP.fillStyle='rgba(10,30,110,0.12)';  ctxP.fillRect(padP.l,padP.t,xfsP-padP.l,phpH);
+  ctxP.fillStyle=`rgba(200,170,0,${isActive('ls')||activeLine===null?0.12:0.04})`;ctxP.fillRect(xfsP,padP.t,xfpPd-xfsP,phpH);
+  ctxP.fillStyle=Cs/Cp<0.05?'rgba(10,30,110,0.12)':'rgba(40,160,140,0.16)'; ctxP.fillRect(xfpPd,padP.t,WP-padP.r-xfpPd,phpH);
+
+  ctxP.textAlign='right';
+  for(let deg=-90;deg<=90;deg+=30){
+    const y=fyMP(deg);
+    ctxP.strokeStyle=deg===0?'#999':'#ddd';ctxP.lineWidth=deg===0?1.5:1;ctxP.setLineDash(deg===0?[]:[4,4]);
+    ctxP.beginPath();ctxP.moveTo(padP.l,y);ctxP.lineTo(WP-padP.r,y);ctxP.stroke();
+    ctxP.setLineDash([]);
+    ctxP.fillStyle='#555';ctxP.font=`${FS*0.6}px monospace`;
+    ctxP.fillText(deg+'°',padP.l-3,y+4);
+  }
+  ctxP.textAlign='center';
+  for(let e=Math.floor(lMin);e<=Math.ceil(lMax);e++){
+    const x=fxMP(Math.pow(10,e));if(x<padP.l||x>WP-padP.r)continue;
+    ctxP.strokeStyle='#ccc';ctxP.lineWidth=1;ctxP.setLineDash([]);
+    ctxP.beginPath();ctxP.moveTo(x,padP.t);ctxP.lineTo(x,padP.t+phpH);ctxP.stroke();
+    for(let m=2;m<=9;m++){const xm=fxMP(m*Math.pow(10,e));if(xm>=padP.l&&xm<=WP-padP.r){ctxP.strokeStyle='#eee';ctxP.beginPath();ctxP.moveTo(xm,padP.t);ctxP.lineTo(xm,padP.t+phpH);ctxP.stroke();}}
+    const fv=Math.pow(10,e);
+    ctxP.fillStyle='#555';ctxP.font=`${FS*0.6}px monospace`;
+    ctxP.fillText(fv>=1e6?(fv/1e6).toFixed(0)+'M':fv>=1e3?(fv/1e3).toFixed(0)+'k':fv+'',x,padP.t+phpH+FS*0.9);
+  }
+  ctxP.textAlign='left';
+  ctxP.strokeStyle=lineCol('fs',false);ctxP.lineWidth=1.5;ctxP.setLineDash([6,3]);
+  ctxP.beginPath();ctxP.moveTo(xfsP,padP.t);ctxP.lineTo(xfsP,padP.t+phpH);ctxP.stroke();
+  ctxP.strokeStyle=lineCol('fp',false);
+  ctxP.beginPath();ctxP.moveTo(xfpPd,padP.t);ctxP.lineTo(xfpPd,padP.t+phpH);ctxP.stroke();
+  ctxP.setLineDash([]);
+  ctxP.font=`bold ${FS*0.58}px monospace`;
+  ctxP.fillStyle=COL_FS;ctxP.textAlign='center';
+  ctxP.fillText(fmtFreqCtx(fs,gap),xfsP,padP.t+phpH-FS*0.3);
+  ctxP.textAlign='left';
+  // Region labels on main phase plot — near 0° line
+  {const z0=fyMP(0);
+  ctxP.font=`bold ${FS*0.6}px monospace`;
+  ctxP.fillStyle='#886600';ctxP.fillText('Ls dom.',xfsP+4,z0-FS*1.35);
+  ctxP.font=`${FS*0.52}px monospace`;
+  ctxP.fillStyle='#886600';ctxP.fillText('inductive',xfsP+4,z0-FS*0.45);
+  ctxP.font=`bold ${FS*0.6}px monospace`;
+  ctxP.fillStyle='#0a2060';ctxP.fillText('Cp dom.',padP.l+4,z0+FS*0.55);
+  ctxP.font=`${FS*0.52}px monospace`;
+  ctxP.fillStyle='#0a2060';ctxP.fillText('capacitive',padP.l+4,z0+FS*1.45);
+  ctxP.font=`bold ${FS*0.6}px monospace`;
+  ctxP.fillStyle=rightCol;ctxP.fillText(rightLbl,xfpP+4,z0+FS*0.55);
+  ctxP.font=`${FS*0.52}px monospace`;
+  ctxP.fillStyle=rightCol;ctxP.fillText('capacitive',xfpP+4,z0+FS*1.45);}
+  strokeCurve(ctxP,freqs.map(f=>fxMP(f)),phT.map(d=>fyMP(d)),COL_PH,[],2.5,phpH*0.4);
+  ctxP.fillStyle='#444';ctxP.font=`${FS*0.7}px monospace`;
+  ctxP.save();ctxP.translate(FS*0.7,padP.t+phpH/2);ctxP.rotate(-Math.PI/2);
+  ctxP.textAlign='center';ctxP.fillText('Phase (°)',0,0);ctxP.restore();
+  ctxP.textAlign='center';
+  ctxP.fillText('Frequency (log)',padP.l+pwP/2,HP-4);
+  ctxP.textAlign='left';
+  ctxP.strokeStyle='#999';ctxP.lineWidth=1;ctxP.setLineDash([]);
+  ctxP.strokeRect(padP.l,padP.t,pwP,phpH);
+
+  // ═══════════════ ZOOM |Z| ════════════════════════════════════
+  const WZZ=canvasZZ.width, HZZ=canvasZZ.height;
+  const padZZ={l:100,r:14,t:30,b:48};
+  lastPadZZ=padZZ; // store for zoom drag handlers
+  const pwZZ=WZZ-padZZ.l-padZZ.r, phZZ=HZZ-padZZ.t-padZZ.b;
+  lastLZMin=lZMin; lastLZMax=lZMax; // store for drag
+  function fxZZ(f){return padZZ.l+(Math.log10(Math.max(f,1e-9))-lZMin)/(lZMax-lZMin)*pwZZ;}
+  function fyZZ(z){return padZZ.t+phZZ-(Math.log10(Math.max(z,1e-9))-zMin_log)/(zMax_log-zMin_log)*phZZ;}
+  function inBZZ(y){return y>=padZZ.t-40&&y<=padZZ.t+phZZ+40;}
+
+  ctxZZ.fillStyle='#fff';ctxZZ.fillRect(0,0,WZZ,HZZ);
+  const xfsZZ=fxZZ(fs),xfpZZ=fxZZ(fp);
+  ctxZZ.fillStyle='rgba(10,30,110,0.13)'; ctxZZ.fillRect(padZZ.l,padZZ.t,xfsZZ-padZZ.l,phZZ);
+  ctxZZ.fillStyle='rgba(200,170,0,0.13)';   ctxZZ.fillRect(xfsZZ,padZZ.t,xfpZZ-xfsZZ,phZZ);
+  ctxZZ.fillStyle=Cs/Cp<0.05?'rgba(10,30,110,0.13)':'rgba(40,160,140,0.18)'; ctxZZ.fillRect(xfpZZ,padZZ.t,WZZ-padZZ.r-xfpZZ,phZZ);
+
+  // region labels removed from zoom |Z|
+
+  ctxZZ.textAlign='right';
+  for(let e=zMin_log;e<=zMax_log;e++){
+    const y=fyZZ(Math.pow(10,e));if(!inBZZ(y))continue;
+    ctxZZ.strokeStyle='#ccc';ctxZZ.lineWidth=1;ctxZZ.setLineDash([]);
+    ctxZZ.beginPath();ctxZZ.moveTo(padZZ.l,y);ctxZZ.lineTo(WZZ-padZZ.r,y);ctxZZ.stroke();
+    for(let m=2;m<=9;m++){const ym=fyZZ(m*Math.pow(10,e));if(inBZZ(ym)){ctxZZ.strokeStyle='#eee';ctxZZ.beginPath();ctxZZ.moveTo(padZZ.l,ym);ctxZZ.lineTo(WZZ-padZZ.r,ym);ctxZZ.stroke();}}
+    const v=Math.pow(10,e);
+    ctxZZ.fillStyle='#555';ctxZZ.font=`${FS*0.6}px monospace`;
+    ctxZZ.fillText(v>=1e6?(v/1e6).toFixed(0)+'MΩ':v>=1e3?(v/1e3).toFixed(0)+'kΩ':v+'Ω',padZZ.l-3,y+4);
+  }
+  ctxZZ.textAlign='center';
+  {const eMin=Math.floor(lZMin),eMax=Math.ceil(lZMax);
+   for(let e=eMin;e<=eMax;e++)for(let m of[1,2,5]){
+    const f=m*Math.pow(10,e);if(f<fZMin||f>fZMax)continue;
+    const x=fxZZ(f);
+    ctxZZ.strokeStyle='#ccc';ctxZZ.lineWidth=1;ctxZZ.setLineDash([]);
+    ctxZZ.beginPath();ctxZZ.moveTo(x,padZZ.t);ctxZZ.lineTo(x,padZZ.t+phZZ);ctxZZ.stroke();
+    ctxZZ.fillStyle='#555';ctxZZ.font=`${FS*0.55}px monospace`;
+    ctxZZ.fillText(fmtFreq(f),x,padZZ.t+phZZ+FS*0.9);
+  }}
+  ctxZZ.textAlign='left';
+  strokeCurve(ctxZZ,zoomFreqs.map(f=>fxZZ(f)),zoomZT.map(z=>fyZZ(z)),'#000',[],2.5,phZZ*0.5);
+  ctxZZ.strokeStyle=COL_FS;ctxZZ.lineWidth=1.5;ctxZZ.setLineDash([6,3]);
+  ctxZZ.beginPath();ctxZZ.moveTo(xfsZZ,padZZ.t);ctxZZ.lineTo(xfsZZ,padZZ.t+phZZ);ctxZZ.stroke();
+  ctxZZ.strokeStyle=COL_FP;
+  ctxZZ.beginPath();ctxZZ.moveTo(xfpZZ,padZZ.t);ctxZZ.lineTo(xfpZZ,padZZ.t+phZZ);ctxZZ.stroke();
+  ctxZZ.setLineDash([]);
+  ctxZZ.fillStyle=COL_FS;ctxZZ.font=`bold ${FS*0.62}px monospace`;
+  ctxZZ.fillText('fs='+fmtFreqCtx(fs,gap),xfsZZ+3,padZZ.t+FS*1.5);
+  ctxZZ.fillStyle=COL_FP;
+  ctxZZ.font=`bold ${FS*0.62}px monospace`;
+  const fpLblZZ='fp='+fmtFreqCtx(fp,gap);
+  const fpLblWZZ=ctxZZ.measureText(fpLblZZ).width;
+  ctxZZ.fillText(fpLblZZ,Math.min(xfpZZ+3, WZZ-padZZ.r-fpLblWZZ-4),padZZ.t+FS*2.6);
+  ctxZZ.font=`bold ${FS*0.58}px monospace`;
+  ctxZZ.fillStyle=COL_FS;ctxZZ.textAlign='center';
+  ctxZZ.fillText(fmtFreqCtx(fs,gap),xfsZZ,padZZ.t+phZZ-FS*0.3);
+  ctxZZ.textAlign='left';
+
+  // ── fs→fp measurement bracket ──
+  {
+    const bY=padZZ.t+phZZ-FS*0.8; // near bottom of plot
+    const tickH=FS*0.5;
+    const midX=(xfsZZ+xfpZZ)/2;
+    // only draw if the two lines are far enough apart to show something
+    if(xfpZZ-xfsZZ>8){
+      ctxZZ.strokeStyle='#aa8800';ctxZZ.lineWidth=2;ctxZZ.setLineDash([]);
+      // horizontal bar
+      ctxZZ.beginPath();ctxZZ.moveTo(xfsZZ,bY);ctxZZ.lineTo(xfpZZ,bY);ctxZZ.stroke();
+      // left tick
+      ctxZZ.beginPath();ctxZZ.moveTo(xfsZZ,bY-tickH);ctxZZ.lineTo(xfsZZ,bY+tickH);ctxZZ.stroke();
+      // right tick
+      ctxZZ.beginPath();ctxZZ.moveTo(xfpZZ,bY-tickH);ctxZZ.lineTo(xfpZZ,bY+tickH);ctxZZ.stroke();
+      // label
+      ctxZZ.fillStyle='#aa8800';ctxZZ.font=`bold ${FS*0.65}px monospace`;
+      ctxZZ.textAlign='center';
+      ctxZZ.fillText('Δf = '+fmtFreq(gap),midX,bY-FS*0.3);
+      ctxZZ.textAlign='left';
+    }
+  }
+  ctxZZ.fillStyle='#444';ctxZZ.font=`${FS*0.7}px monospace`;
+  ctxZZ.save();ctxZZ.translate(FS*0.7,padZZ.t+phZZ/2);ctxZZ.rotate(-Math.PI/2);
+  ctxZZ.textAlign='center';ctxZZ.fillText('|Z| (Ω)',0,0);ctxZZ.restore();
+  ctxZZ.strokeStyle='#999';ctxZZ.lineWidth=1;ctxZZ.setLineDash([]);
+  ctxZZ.strokeRect(padZZ.l,padZZ.t,pwZZ,phZZ);
+
+  // ═══════════════ ZOOM Phase ══════════════════════════════════
+  const WPZ=canvasPZ.width, HPZ=canvasPZ.height;
+  const padPZ={l:100,r:14,t:14,b:48};
+  const pwPZ=WPZ-padPZ.l-padPZ.r, phpHZ=HPZ-padPZ.t-padPZ.b;
+  function fxPZ(f){return padPZ.l+(Math.log10(Math.max(f,1e-9))-lZMin)/(lZMax-lZMin)*pwPZ;}
+  function fyPZ(d){return padPZ.t+phpHZ-(d+90)/180*phpHZ;}
+
+  ctxPZ.fillStyle='#fff';ctxPZ.fillRect(0,0,WPZ,HPZ);
+  const xfsPZ=fxPZ(fs),xfpPZ=fxPZ(fp);
+  ctxPZ.fillStyle='rgba(10,30,110,0.12)';  ctxPZ.fillRect(padPZ.l,padPZ.t,xfsPZ-padPZ.l,phpHZ);
+  ctxPZ.fillStyle='rgba(200,170,0,0.12)';   ctxPZ.fillRect(xfsPZ,padPZ.t,xfpPZ-xfsPZ,phpHZ);
+  ctxPZ.fillStyle=Cs/Cp<0.05?'rgba(10,30,110,0.12)':'rgba(40,160,140,0.16)'; ctxPZ.fillRect(xfpPZ,padPZ.t,WPZ-padPZ.r-xfpPZ,phpHZ);
+
+  // region labels removed from zoom phase
+
+  ctxPZ.textAlign='right';
+  for(let deg=-90;deg<=90;deg+=30){
+    const y=fyPZ(deg);
+    ctxPZ.strokeStyle=deg===0?'#999':'#ddd';ctxPZ.lineWidth=deg===0?1.5:1;ctxPZ.setLineDash(deg===0?[]:[4,4]);
+    ctxPZ.beginPath();ctxPZ.moveTo(padPZ.l,y);ctxPZ.lineTo(WPZ-padPZ.r,y);ctxPZ.stroke();
+    ctxPZ.setLineDash([]);
+    ctxPZ.fillStyle='#555';ctxPZ.font=`${FS*0.6}px monospace`;
+    ctxPZ.fillText(deg+'°',padPZ.l-3,y+4);
+  }
+  ctxPZ.textAlign='center';
+  {const eMin=Math.floor(lZMin),eMax=Math.ceil(lZMax);
+   for(let e=eMin;e<=eMax;e++)for(let m of[1,2,5]){
+    const f=m*Math.pow(10,e);if(f<fZMin||f>fZMax)continue;
+    const x=fxPZ(f);
+    ctxPZ.strokeStyle='#ccc';ctxPZ.lineWidth=1;ctxPZ.setLineDash([]);
+    ctxPZ.beginPath();ctxPZ.moveTo(x,padPZ.t);ctxPZ.lineTo(x,padPZ.t+phpHZ);ctxPZ.stroke();
+    ctxPZ.fillStyle='#555';ctxPZ.font=`${FS*0.55}px monospace`;
+    ctxPZ.fillText(fmtFreq(f),x,padPZ.t+phpHZ+FS*0.9);
+  }}
+  ctxPZ.textAlign='left';
+  ctxPZ.strokeStyle=COL_FS;ctxPZ.lineWidth=1.5;ctxPZ.setLineDash([6,3]);
+  ctxPZ.beginPath();ctxPZ.moveTo(xfsPZ,padPZ.t);ctxPZ.lineTo(xfsPZ,padPZ.t+phpHZ);ctxPZ.stroke();
+  ctxPZ.strokeStyle=COL_FP;
+  ctxPZ.beginPath();ctxPZ.moveTo(xfpPZ,padPZ.t);ctxPZ.lineTo(xfpPZ,padPZ.t+phpHZ);ctxPZ.stroke();
+  ctxPZ.setLineDash([]);
+  ctxPZ.fillStyle=COL_FS;ctxPZ.font=`bold ${FS*0.55}px monospace`;
+  ctxPZ.fillText('fs='+fmtFreqCtx(fs,gap),xfsPZ+3,padPZ.t+FS*1.2);
+  ctxPZ.fillStyle=COL_FP;
+  ctxPZ.font=`bold ${FS*0.55}px monospace`;
+  const fpLblPZ='fp='+fmtFreqCtx(fp,gap);
+  const fpLblWPZ=ctxPZ.measureText(fpLblPZ).width;
+  ctxPZ.fillText(fpLblPZ,Math.min(xfpPZ+3, WPZ-padPZ.r-fpLblWPZ-4),padPZ.t+FS*2.1);
+  ctxPZ.font=`bold ${FS*0.55}px monospace`;
+  ctxPZ.fillStyle=COL_FS;ctxPZ.textAlign='center';
+  ctxPZ.fillText(fmtFreqCtx(fs,gap),xfsPZ,padPZ.t+phpHZ-FS*0.3);
+  ctxPZ.textAlign='left';
+
+  // ── fs→fp measurement bracket ──
+  {
+    const bY=padPZ.t+phpHZ-FS*0.8;
+    const tickH=FS*0.5;
+    const midX=(xfsPZ+xfpPZ)/2;
+    if(xfpPZ-xfsPZ>8){
+      ctxPZ.strokeStyle='#aa8800';ctxPZ.lineWidth=2;ctxPZ.setLineDash([]);
+      ctxPZ.beginPath();ctxPZ.moveTo(xfsPZ,bY);ctxPZ.lineTo(xfpPZ,bY);ctxPZ.stroke();
+      ctxPZ.beginPath();ctxPZ.moveTo(xfsPZ,bY-tickH);ctxPZ.lineTo(xfsPZ,bY+tickH);ctxPZ.stroke();
+      ctxPZ.beginPath();ctxPZ.moveTo(xfpPZ,bY-tickH);ctxPZ.lineTo(xfpPZ,bY+tickH);ctxPZ.stroke();
+      ctxPZ.fillStyle='#aa8800';ctxPZ.font=`bold ${FS*0.65}px monospace`;
+      ctxPZ.textAlign='center';
+      ctxPZ.fillText('Δf = '+fmtFreq(gap),midX,bY-FS*0.3);
+      ctxPZ.textAlign='left';
+    }
+  }
+  strokeCurve(ctxPZ,zoomFreqs.map(f=>fxPZ(f)),zoomPhT.map(d=>fyPZ(d)),COL_PH,[],2.5,phpHZ*0.5);
+  ctxPZ.fillStyle='#444';ctxPZ.font=`${FS*0.7}px monospace`;
+  ctxPZ.save();ctxPZ.translate(FS*0.7,padPZ.t+phpHZ/2);ctxPZ.rotate(-Math.PI/2);
+  ctxPZ.textAlign='center';ctxPZ.fillText('Phase (°)',0,0);ctxPZ.restore();
+  ctxPZ.textAlign='center';
+  ctxPZ.fillText('Frequency (log)',padPZ.l+pwPZ/2,HPZ-4);
+  ctxPZ.textAlign='left';
+  ctxPZ.strokeStyle='#999';ctxPZ.lineWidth=1;ctxPZ.setLineDash([]);
+  ctxPZ.strokeRect(padPZ.l,padPZ.t,pwPZ,phpHZ);
+
+  // Q factor (needed for game and info)
+  const Q=Math.round(2*Math.PI*fs*Ls/Rs);
+
+  // Info
+  const ppm=(fp/fs-1)*1e6;
+  // info bar removed
+}
+
+document.querySelectorAll('input').forEach(el=>el.addEventListener('input',()=>{clearPreset();draw();}));
+window.addEventListener('resize',resize);
+resize();
+
+// game mode removed
+
+
+// ═══════════════════════════════════════════════════════════════
+// FREQUENCY CURSOR — follows mouse across all charts
+// ═══════════════════════════════════════════════════════════════
+const cursorTip = document.getElementById('cursorTip');
+
+function setSvgShade(id, color){
+  const el = document.getElementById(id);
+  if(el) el.setAttribute('fill', color);
+}
+
+function updateCircuitShading(f, fs, fp, p, phaseDeg){
+  const Cs=p.Cs, Cp=p.Cp;
+  const inInductive = f>fs && f<fp;
+  const phase = phaseDeg !== undefined ? phaseDeg : 90; // default capacitive
+
+  // Phase-based resistive zone: |phase| < 45° means resistive character dominant
+  const isResistive = Math.abs(phase) < 45;
+
+  // Reset all
+  setSvgShade('svgCp','rgba(10,26,122,0.0)');
+  setSvgShade('svgCs','rgba(85,153,221,0.0)');
+  setSvgShade('svgLs','rgba(180,140,0,0.0)');
+  setSvgShade('svgRs','rgba(187,85,0,0.0)');
+  setSvgShade('svgRp','rgba(136,34,153,0.0)');
+
+  if(isResistive){
+    // Phase between -45° and +45°: resistive dominant
+    // Determine Rs vs Rp by proximity to fs vs fp on log scale
+    const distFs = Math.abs(Math.log10(f/fs));
+    const distFp = Math.abs(Math.log10(f/fp));
+    if(distFs <= distFp){
+      // Closer to fs → Rs dominant (series resonance loss)
+      setSvgShade('svgRs','rgba(187,85,0,0.42)');
+    } else {
+      // Closer to fp → Rp dominant (parallel resonance loss)
+      setSvgShade('svgRp','rgba(136,34,153,0.42)');
+    }
+  } else if(inInductive){
+    // Inductive window outside resistive zone
+    setSvgShade('svgLs','rgba(180,140,0,0.38)');
+  } else if(f < fs){
+    // Below fs: Cp dominates
+    setSvgShade('svgCp','rgba(10,26,122,0.35)');
+  } else {
+    // Above fp: Cp or Cs dominates
+    if(Cs/Cp < 0.05){
+      setSvgShade('svgCp','rgba(10,26,122,0.35)');
+    } else {
+      setSvgShade('svgCs','rgba(85,153,221,0.35)');
+    }
+  }
+}
+
+function getRegionName(f, fs, fp, p, phaseDeg){
+  const phase = phaseDeg !== undefined ? phaseDeg : 90;
+  const isResistive = Math.abs(phase) < 45;
+  const inInductive = f>fs && f<fp;
+  if(isResistive){
+    const distFs = Math.abs(Math.log10(f/fs));
+    const distFp = Math.abs(Math.log10(f/fp));
+    if(distFs <= distFp) return '⚡ Resistive — Rs dominant (near fs)';
+    else                 return '🔄 Resistive — Rp dominant (near fp)';
+  }
+  if(f<fs)       return '📡 Capacitive — Cp dominant';
+  if(inInductive) return '🌀 Inductive — Ls dominant';
+  return p.Cs/p.Cp<0.05 ? '📡 Capacitive — Cp dominant' : '🔵 Capacitive — Cs dominant';
+}
+
+function probeAt(canvasEl, clientX, clientY){
+  // Convert clientX to frequency using main AX
+  const rect = canvasEl.getBoundingClientRect();
+  const mx = clientX - rect.left;
+  const pad = AX.pad;
+  const pw = canvasEl.width - pad.l - pad.r;
+  if(mx < pad.l || mx > canvasEl.width - pad.r) return null;
+  const logF = AX.lMin + (mx - pad.l)/pw * (AX.lMax - AX.lMin);
+  return Math.pow(10, logF);
+}
+
+function drawCursorLine(ctx, x, W, H, pad, color){
+  ctx.save();
+  ctx.strokeStyle = color||'rgba(80,80,80,0.55)';
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([5,4]);
+  ctx.beginPath();
+  ctx.moveTo(x, pad.t);
+  ctx.lineTo(x, H - pad.b);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+let lastCursorF = null;
+
+function onChartMouseMove(e, canvasEl){
+  const f = probeAt(canvasEl, e.clientX, e.clientY);
+  if(!f){ cursorTip.style.display='none'; return; }
+  lastCursorF = f;
+
+  const p = getP();
+  const fs = Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)), FMIN_CLAMP);
+  const fp = fs*Math.sqrt(1+p.Cs/p.Cp);
+
+  // Compute Z and phase at f
+  const zd = zComplex(f, p);
+  const zmag = zd[0], zph = zd[1];
+
+  // Set active lines based on dominant region
+  activeLine = getActiveLines(f, fs, fp, p, zph);
+  // Update circuit shading
+  updateCircuitShading(f, fs, fp, p, zph);
+
+  // Update readout panel
+  document.getElementById('frFreq').textContent = 'f  = ' + fmtFreq(f);
+  document.getElementById('frZ').textContent    = '|Z| = ' + fmtOhm(zmag);
+  document.getElementById('frPh').textContent   = '∠Z = ' + zph.toFixed(1) + '°';
+  document.getElementById('frDom').textContent  = getRegionName(f, fs, fp, p, zph);
+
+  // Show tooltip
+  cursorTip.style.display = 'block';
+  cursorTip.style.left = (e.clientX + 16) + 'px';
+  cursorTip.style.top  = (e.clientY - 70) + 'px';
+  cursorTip.textContent =
+    'f   = ' + fmtFreq(f) + '\n' +
+    '|Z| = ' + fmtOhm(zmag) + '\n' +
+    '∠Z  = ' + zph.toFixed(1) + '°\n' +
+    getRegionName(f, fs, fp, p, zph);
+
+  // Draw cursor line on all 4 canvases
+  draw();  // full redraw to clear previous cursor, then draw new one below
+  drawCursorOnAll(f, fs, fp);
+}
+
+function drawCursorOnAll(f, fs, fp){
+  if(!f) return;
+  // Main |Z|
+  {
+    const pad=AX.pad, W=canvasZ.width, H=canvasZ.height;
+    const pw=W-pad.l-pad.r;
+    const x=pad.l+(Math.log10(Math.max(f,1e-9))-AX.lMin)/(AX.lMax-AX.lMin)*pw;
+    if(x>=pad.l&&x<=W-pad.r) drawCursorLine(ctxZ,x,W,H,pad);
+  }
+  // Main phase
+  {
+    const pad={l:100,r:32,t:14,b:48}, W=canvasP.width, H=canvasP.height;
+    const pw=W-pad.l-pad.r;
+    const x=pad.l+(Math.log10(Math.max(f,1e-9))-AX.lMin)/(AX.lMax-AX.lMin)*pw;
+    if(x>=pad.l&&x<=W-pad.r) drawCursorLine(ctxP,x,W,H,pad);
+  }
+  // Zoom |Z|
+  {
+    const p=getP();
+    const fs2=Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)),FMIN_CLAMP);
+    const fp2=fs2*Math.sqrt(1+p.Cs/p.Cp);
+    const span=Math.max(fp2-fs2,fs2*1e-6);
+    const fZMin=Math.max(fs2-0.5*span,FMIN_CLAMP), fZMax=fp2+0.5*span;
+    const lZMin=Math.log10(Math.max(fZMin,1e-9)), lZMax=Math.log10(Math.max(fZMax,1e-9));
+    const pad=lastPadZZ, W=canvasZZ.width, H=canvasZZ.height;
+    const pw=W-pad.l-pad.r;
+    const x=pad.l+(Math.log10(Math.max(f,1e-9))-lZMin)/(lZMax-lZMin)*pw;
+    if(x>=pad.l&&x<=W-pad.r) drawCursorLine(ctxZZ,x,W,H,pad);
+  }
+  // Zoom phase (same zoom x-axis as zoom |Z|)
+  {
+    const p=getP();
+    const fs2=Math.max(1/(2*Math.PI*Math.sqrt(p.Ls*p.Cs)),FMIN_CLAMP);
+    const fp2=fs2*Math.sqrt(1+p.Cs/p.Cp);
+    const span=Math.max(fp2-fs2,fs2*1e-6);
+    const fZMin=Math.max(fs2-0.5*span,FMIN_CLAMP), fZMax=fp2+0.5*span;
+    const lZMin=Math.log10(Math.max(fZMin,1e-9)), lZMax=Math.log10(Math.max(fZMax,1e-9));
+    const pad={l:100,r:14,t:14,b:48}, W=canvasPZ.width, H=canvasPZ.height;
+    const pw=W-pad.l-pad.r;
+    const x=pad.l+(Math.log10(Math.max(f,1e-9))-lZMin)/(lZMax-lZMin)*pw;
+    if(x>=pad.l&&x<=W-pad.r) drawCursorLine(ctxPZ,x,W,H,pad);
+  }
+}
+
+function onChartMouseLeave(){
+  lastCursorF = null;
+  activeLine = null;
+  cursorTip.style.display = 'none';
+  // Reset circuit shading
+  ['svgCp','svgCs','svgLs','svgRs','svgRp'].forEach(id=>setSvgShade(id,'rgba(0,0,0,0)'));
+  document.getElementById('frFreq').textContent='f  = —';
+  document.getElementById('frZ').textContent='|Z| = —';
+  document.getElementById('frPh').textContent='∠Z = —';
+  document.getElementById('frDom').textContent='Region: —';
+  draw();
+}
+
+// Attach to all 4 canvases
+[canvasZ, canvasP, canvasZZ, canvasPZ].forEach(c=>{
+  c.addEventListener('mousemove', e=>{
+    if(dragMode) return; // don't show cursor while dragging
+    onChartMouseMove(e, c);
+  });
+  c.addEventListener('mouseleave', onChartMouseLeave);
+});
+
+</script>
+</body>
+</html>
